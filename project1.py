@@ -1,70 +1,55 @@
-import time
-import Adafruit_DHT
-import RPi.GPIO as GPIO
+#include <WiFi.h>
+#include <HTTPClient.h>
 
-# Sensor setup
-DHT_SENSOR = Adafruit_DHT.DHT22
-DHT_PIN = 4  # GPIO pin where the DHT sensor is connected
+const char* ssid = "";
+const char* password = "";
+String apiRoute="https://mlew-api-iot.onrender.com/store?label=";
+String alertRoute="https://mlew-api-iot.onrender.com/alert?type=";
 
-# GPIO setup for fan and heating pad
-FAN_PIN = 17   # GPIO pin for the fan
-HEATER_PIN = 27  # GPIO pin for the heating pad
+bool isSent=false;
+int moisture=34;
 
-# Initialize GPIO
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(FAN_PIN, GPIO.OUT)
-GPIO.setup(HEATER_PIN, GPIO.OUT)
+void setup() {
+  Serial.begin(9600);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
 
-# Threshold values for temperature and humidity
-TEMP_THRESHOLD_HIGH = 30  # High temperature in Celsius
-TEMP_THRESHOLD_LOW = 20   # Low temperature for heating
-HUMIDITY_THRESHOLD_HIGH = 70  # High humidity percentage
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
 
-# Function to read sensor data
-def read_sensor_data():
-    humidity, temperature = Adafruit_DHT.read_retry(DHT_SENSOR, DHT_PIN)
-    if humidity is not None and temperature is not None:
-        return temperature, humidity
-    else:
-        print("Failed to retrieve data from sensor")
-        return None, None
+  Serial.println("");
+  Serial.println("Connected to WiFi");
+  pinMode(moisture,INPUT);
+}
 
-# Function to control the fan and heater
-def control_environment(temp, humidity):
-    # Cooling (turn on fan if too hot or humid)
-    if temp > TEMP_THRESHOLD_HIGH or humidity > HUMIDITY_THRESHOLD_HIGH:
-        GPIO.output(FAN_PIN, GPIO.HIGH)  # Turn on fan
-        GPIO.output(HEATER_PIN, GPIO.LOW)  # Turn off heater
-        print("Cooling: Fan On")
+void sendDataToDashboard(String api){
+  if(WiFi.status()==WL_CONNECTED){
+    HTTPClient http;
+    http.begin(api);
+    int responseCode=http.GET();
+    if(responseCode>0){
+      String response=http.getString();
+      Serial.println(response);
+      http.end();
+    }
+  }
+}
+void loop() {
+    int m=analogRead(moisture);
+    Serial.print("Moisture: ");
+    Serial.println(m);
     
-    # Heating (turn on heater if too cold)
-    elif temp < TEMP_THRESHOLD_LOW:
-        GPIO.output(FAN_PIN, GPIO.LOW)  # Turn off fan
-        GPIO.output(HEATER_PIN, GPIO.HIGH)  # Turn on heater
-        print("Heating: Heater On")
+    sendDataToDashboard(apiRoute+"Moisture"+"&value="+String(m));
+    delay(2000);
     
-    # Ideal condition (turn off fan and heater)
-    else:
-        GPIO.output(FAN_PIN, GPIO.LOW)  # Turn off fan
-        GPIO.output(HEATER_PIN, GPIO.LOW)  # Turn off heater
-        print("Ideal Conditions: Fan and Heater Off")
 
-# Main loop
-try:
-    while True:
-        # Read sensor data
-        temp, humidity = read_sensor_data()
-        
-        if temp is not None and humidity is not None:
-            print(f"Temperature: {temp:.1f}C  Humidity: {humidity:.1f}%")
-            
-            # Control the environment based on sensor data
-            control_environment(temp, humidity)
-        
-        # Wait before reading again
-        time.sleep(2)
-
-except KeyboardInterrupt:
-    print("Program stopped by user")
-finally:
-    GPIO.cleanup()  # Clean up GPIO settings when program ends
+    if(m<500 && !isSent){
+      sendDataToDashboard(alertRoute+"danger"+"&message=Heavy Water in the Field");
+      isSent=true;
+    } 
+    if(m>4000){
+      isSent=false;
+    }
+}
